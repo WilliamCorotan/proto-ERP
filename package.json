@@ -1,0 +1,39 @@
+{
+  "name": "open-erp-ecosystem",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "description": "A modular, extensible ERP ecosystem platform.",
+  "scripts": {
+    "build": "turbo run build",
+    "contracts:generate": "pnpm --filter @erp/api contracts:generate && pnpm --filter @erp/api contracts:types",
+    "dev": "turbo run dev --parallel",
+    "dev:web": "pnpm --filter @erp/web dev",
+    "dev:api": "pnpm --filter @erp/api dev",
+    "dev:worker": "pnpm --filter @erp/worker dev",
+    "smoke:api": "node scripts/smoke-api.mjs",
+    "smoke:worker": "pnpm --filter @erp/worker outbox:dispatch",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:integration": "pnpm --filter @erp/db test:integration",
+    "typecheck": "turbo run typecheck",
+    "verify:release": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build",
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter @erp/db prisma generate",
+    "db:migrate": "pnpm --filter @erp/db prisma migrate dev",
+    "db:studio": "pnpm --filter @erp/db prisma studio",
+    "audit:deps": "pnpm audit",
+    "audit:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm audit:deps"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.10.1",
+    "eslint": "^10.6.0",
+    "prettier": "^3.7.4",
+    "turbo": "^2.10.2",
+    "typescript-eslint": "^8.62.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@erp/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test --max-warnings=0",
+    "test": "vitest run --passWithNoTests --exclude 'test/**/*.integration.test.ts'",
+    "test:integration": "vitest run test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prisma": "prisma"
+  },
+  "dependencies": {
+    "@erp/commerce": "workspace:*",
+    "@erp/hr": "workspace:*",
+    "@erp/integration": "workspace:*",
+    "@erp/inventory": "workspace:*",
+    "@erp/manufacturing": "workspace:*",
+    "@erp/operations": "workspace:*",
+    "@erp/procurement": "workspace:*",
+    "@erp/quality": "workspace:*",
+    "@erp/reporting": "workspace:*",
+    "@erp/sales": "workspace:*",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6",
+    "prisma": "^7.8.0",
+    "tsx": "^4.21.0",
+    "vitest": "^4.1.9"
+  }
+}

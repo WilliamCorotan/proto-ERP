@@ -1,0 +1,35 @@
+{
+  "name": "@erp/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "lint": "eslint src --max-warnings=0",
+    "outbox:dispatch": "tsx src/dispatch-outbox.ts",
+    "start": "node dist/apps/worker/src/main.js",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@erp/accounting": "workspace:*",
+    "@erp/core": "workspace:*",
+    "@erp/db": "workspace:*",
+    "@erp/integration": "workspace:*",
+    "@erp/inventory": "workspace:*",
+    "@erp/manufacturing": "workspace:*",
+    "@erp/operations": "workspace:*",
+    "@erp/procurement": "workspace:*",
+    "@erp/quality": "workspace:*",
+    "@erp/reporting": "workspace:*",
+    "@erp/sales": "workspace:*",
+    "@prisma/client": "^7.8.0",
+    "bullmq": "^5.79.2",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "vitest": "^4.1.9"
+  }
+}

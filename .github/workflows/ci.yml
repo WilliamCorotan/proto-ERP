@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify build and PostgreSQL integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: erp_ci
+          POSTGRES_PASSWORD: erp_ci_password
+          POSTGRES_DB: erp_ci_admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp_ci -d erp_ci_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      CI: true
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://erp_ci:erp_ci_password@localhost:5432/erp_ci_admin?schema=public
+      TEST_DATABASE_URL: postgresql://erp_ci:erp_ci_password@localhost:5432/erp_ci_admin?schema=public
+      JWT_SECRET: ci-only-7f4f25114cb242d4a953a29792b495c85693ce9154864a03997509dc7e697376
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Activate pinned pnpm with Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+          pnpm --version
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Generate API contracts
+        run: pnpm contracts:generate
+
+      - name: Reject generated contract drift
+        run: git diff --exit-code -- docs/openapi.json packages/sdk/src/openapi-types.ts
+
+      - name: Lint
+        run: pnpm lint --force
+
+      - name: Typecheck
+        run: pnpm typecheck --force
+
+      - name: Run unit tests
+        run: pnpm test --force
+
+      - name: Run PostgreSQL migration and integration tests
+        run: pnpm test:integration
+
+      - name: Build
+        run: pnpm build --force

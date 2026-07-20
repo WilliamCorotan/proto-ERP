@@ -1,0 +1,25 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/modules/*"
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  sharp: true
+overrides:
+  '@hono/node-server': '>=1.19.13'
+  js-yaml: 4.2.0
+  multer: '>=2.2.0'
+  postcss: '>=8.5.10'
+minimumReleaseAgeExclude:
+  - '@turbo/darwin-64@2.10.2'
+  - '@turbo/darwin-arm64@2.10.2'
+  - '@turbo/linux-64@2.10.2'
+  - '@turbo/linux-arm64@2.10.2'
+  - '@turbo/windows-64@2.10.2'
+  - '@turbo/windows-arm64@2.10.2'
+  - turbo@2.10.2
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
