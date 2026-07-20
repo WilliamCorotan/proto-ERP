@@ -119,6 +119,7 @@ async function main() {
     where: { userId_roleId: { userId: adminUser.id, roleId: adminRole.id } },
     update: {},
     create: {
+      tenantId: tenant.id,
       userId: adminUser.id,
       roleId: adminRole.id
     }

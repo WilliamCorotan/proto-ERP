@@ -203,6 +203,7 @@ export class AuthService {
     if (roles.length > 0) {
       await this.prisma.userRole.createMany({
         data: roles.map((role) => ({
+          tenantId,
           userId: user.id,
           roleId: role.id
         })),

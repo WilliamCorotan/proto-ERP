@@ -179,6 +179,7 @@ model User {
   roles  UserRole[]
 
   @@unique([tenantId, email])
+  @@unique([tenantId, id], map: "User_tenantId_id_key")
   @@index([tenantId])
 }
 
@@ -195,16 +196,20 @@ model Role {
   users  UserRole[]
 
   @@unique([tenantId, key])
+  @@unique([tenantId, id], map: "Role_tenantId_id_key")
 }
 
 model UserRole {
-  userId String
-  roleId String
+  tenantId String
+  userId   String
+  roleId   String
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "UserRole_tenantId_userId_fkey")
+  role Role @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "UserRole_tenantId_roleId_fkey")
 
   @@id([userId, roleId])
+  @@index([tenantId, userId], map: "UserRole_tenantId_userId_idx")
+  @@index([tenantId, roleId], map: "UserRole_tenantId_roleId_idx")
 }
 
 model Setting {
@@ -404,6 +409,7 @@ model Invoice {
   posSales PosSale[]
 
   @@unique([tenantId, number])
+  @@unique([tenantId, id], map: "Invoice_tenantId_id_key")
   @@index([tenantId, orderId], map: "Invoice_tenantId_orderId_idx")
   @@index([tenantId, status])
 }
@@ -423,6 +429,7 @@ model Account {
   lines  JournalLine[]
 
   @@unique([tenantId, code])
+  @@unique([tenantId, id], map: "Account_tenantId_id_key")
   @@index([tenantId, type])
 }
 
@@ -478,11 +485,13 @@ model JournalEntry {
 
   @@unique([tenantId, number])
   @@unique([tenantId, sourceEntity, sourceId])
+  @@unique([tenantId, id], map: "JournalEntry_tenantId_id_key")
   @@index([tenantId, status])
 }
 
 model JournalLine {
   id          String   @id @default(cuid())
+  tenantId    String
   entryId     String
   accountId   String
   description String
@@ -490,10 +499,12 @@ model JournalLine {
   credit      Decimal  @default(0) @db.Decimal(18, 2)
   createdAt   DateTime @default(now())
 
-  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  account Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  entry   JournalEntry @relation(fields: [tenantId, entryId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "JournalLine_tenantId_entryId_fkey")
+  account Account      @relation(fields: [tenantId, accountId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "JournalLine_tenantId_accountId_fkey")
 
   @@index([accountId])
+  @@index([tenantId, entryId], map: "JournalLine_tenantId_entryId_idx")
+  @@index([tenantId, accountId], map: "JournalLine_tenantId_accountId_idx")
 }
 
 model Payment {
@@ -508,11 +519,12 @@ model Payment {
   createdAt      DateTime @default(now())
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  invoice      Invoice       @relation(fields: [tenantId, invoiceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "Payment_tenantId_invoiceId_fkey")
+  journalEntry JournalEntry? @relation(fields: [tenantId, journalEntryId], references: [tenantId, id], onDelete: SetNull, onUpdate: Restrict, map: "Payment_tenantId_journalEntryId_fkey")
   posSales     PosSale[]
 
   @@index([tenantId, invoiceId])
+  @@index([tenantId, journalEntryId], map: "Payment_tenantId_journalEntryId_idx")
 }
 
 model BankAccount {
