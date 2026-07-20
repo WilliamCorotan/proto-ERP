@@ -522,7 +522,6 @@ export const DispatchWebhookSchema = z.object({
   subscriptionId: z.string().min(1),
   eventType: z.string().trim().min(2).max(120),
   payload: z.record(z.string().min(1), z.unknown()).default({}),
-  fail: z.boolean().default(false),
 });
 
 export const CreateLeadSchema = z.object({

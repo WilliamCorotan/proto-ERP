@@ -4546,7 +4546,7 @@
             "bearer": []
           }
         ],
-        "summary": "Dispatch a webhook event to a subscription",
+        "summary": "Enqueue a webhook event for worker delivery",
         "tags": [
           "erp",
           "integrations"
@@ -4603,7 +4603,7 @@
             "bearer": []
           }
         ],
-        "summary": "Retry a failed webhook delivery or move it to the dead-letter queue",
+        "summary": "Requeue a failed or dead-lettered webhook delivery",
         "tags": [
           "erp",
           "integrations"
@@ -4660,7 +4660,7 @@
             "bearer": []
           }
         ],
-        "summary": "Dispatch a pending outbox event to subscribed webhooks",
+        "summary": "Requeue an outbox event for worker delivery",
         "tags": [
           "erp",
           "integrations"
@@ -11764,10 +11764,6 @@
           "payload": {
             "type": "object",
             "additionalProperties": true
-          },
-          "fail": {
-            "type": "boolean",
-            "default": false
           }
         }
       },

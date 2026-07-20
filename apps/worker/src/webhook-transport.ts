@@ -1,9 +1,12 @@
 import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { request as requestHttp } from "node:http";
+import { request as requestHttps } from "node:https";
 import { isIP } from "node:net";
 
 const DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_DNS_TIMEOUT_MS = 2_000;
 const MAX_ERROR_LENGTH = 256;
 
 export type ResolvedAddress = {
@@ -18,7 +21,12 @@ export type WebhookDnsResolver = (
 export type WebhookFetch = (
   url: string,
   init: RequestInit,
-) => Promise<{ status: number }>;
+  pinnedAddresses?: readonly ResolvedAddress[],
+) => Promise<{
+  status: number;
+  headers?: { get(name: string): string | null };
+  body?: { cancel(): Promise<unknown> } | null;
+}>;
 
 export type WebhookTransportRequest = {
   url: string;
@@ -33,6 +41,7 @@ export type WebhookTransportResult = {
   classification: "delivered" | "permanent" | "retryable";
   status?: number;
   error?: string;
+  retryAfterMs?: number;
 };
 
 export type WebhookTransportOptions = {
@@ -41,6 +50,7 @@ export type WebhookTransportOptions = {
   now?: () => Date;
   production?: boolean;
   timeoutMs?: number;
+  dnsTimeoutMs?: number;
   maxRequestBytes?: number;
 };
 
@@ -50,19 +60,24 @@ export class SecureWebhookTransport {
   private readonly now: () => Date;
   private readonly production: boolean;
   private readonly timeoutMs: number;
+  private readonly dnsTimeoutMs: number;
   private readonly maxRequestBytes: number;
 
   constructor(options: WebhookTransportOptions = {}) {
-    this.fetch = options.fetch ?? globalThis.fetch;
+    this.fetch = options.fetch ?? pinnedFetch;
     this.resolver = options.resolver ?? resolveAddresses;
     this.now = options.now ?? (() => new Date());
     this.production =
       options.production ?? process.env.NODE_ENV === "production";
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.dnsTimeoutMs = options.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS;
     this.maxRequestBytes = options.maxRequestBytes ?? DEFAULT_MAX_REQUEST_BYTES;
 
     if (this.timeoutMs < 1_000 || this.timeoutMs > 30_000) {
       throw new Error("Webhook timeout must be between 1000 and 30000 ms.");
+    }
+    if (this.dnsTimeoutMs < 100 || this.dnsTimeoutMs > 10_000) {
+      throw new Error("Webhook DNS timeout must be between 100 and 10000 ms.");
     }
     if (
       !Number.isSafeInteger(this.maxRequestBytes) ||
@@ -84,10 +99,13 @@ export class SecureWebhookTransport {
       return permanent("Webhook signing secret is required.");
     }
 
-    let target: URL;
+    let validated: ValidatedTarget;
     try {
-      target = await this.validateTarget(request.url);
+      validated = await this.validateTarget(request.url);
     } catch (error) {
+      if (error instanceof WebhookDnsError) {
+        return retryable(error.message);
+      }
       return permanent(sanitizePolicyError(error));
     }
 
@@ -102,22 +120,36 @@ export class SecureWebhookTransport {
     const requestBody = copyToArrayBuffer(request.rawBody);
 
     try {
-      const response = await this.fetch(target.toString(), {
-        method: "POST",
-        redirect: "manual",
-        signal: abortController.signal,
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "open-erp-webhook/1.0",
-          "x-erp-delivery-id": request.deliveryId,
-          "x-erp-event": request.eventType,
-          "x-erp-event-id": request.eventId,
-          "x-erp-signature": `v1=${signature}`,
-          "x-erp-timestamp": timestamp,
+      const response = await this.fetch(
+        validated.url.toString(),
+        {
+          method: "POST",
+          redirect: "manual",
+          signal: abortController.signal,
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "open-erp-webhook/1.0",
+            "x-erp-delivery-id": request.deliveryId,
+            "x-erp-event": request.eventType,
+            "x-erp-event-id": request.eventId,
+            "x-erp-signature": `v1=${signature}`,
+            "x-erp-signature-version": "v1",
+            "x-erp-timestamp": timestamp,
+          },
+          body: requestBody,
         },
-        body: requestBody,
-      });
-      return classifyWebhookStatus(response.status);
+        validated.addresses,
+      );
+      const result = classifyWebhookStatus(response.status);
+      if (result.classification === "retryable") {
+        const retryAfterMs = parseRetryAfter(
+          response.headers?.get("retry-after") ?? null,
+          this.now(),
+        );
+        if (retryAfterMs !== undefined) result.retryAfterMs = retryAfterMs;
+      }
+      await response.body?.cancel().catch(() => undefined);
+      return result;
     } catch {
       if (abortController.signal.aborted) {
         return retryable("Webhook request timed out.");
@@ -128,7 +160,7 @@ export class SecureWebhookTransport {
     }
   }
 
-  private async validateTarget(value: string): Promise<URL> {
+  private async validateTarget(value: string): Promise<ValidatedTarget> {
     let url: URL;
     try {
       url = new URL(value);
@@ -184,18 +216,21 @@ export class SecureWebhookTransport {
       );
     }
 
-    // DNS validation and fetch do not share a pinned socket. Production must
-    // also enforce an outbound proxy/firewall denylist to contain DNS rebinding.
-    return url;
+    return { url, addresses };
   }
 
   private async resolveSafely(
     hostname: string,
   ): Promise<readonly ResolvedAddress[]> {
     try {
-      return await this.resolver(hostname);
-    } catch {
-      throw new WebhookPolicyError("Webhook destination DNS lookup failed.");
+      return await withDeadline(
+        this.resolver(hostname),
+        this.dnsTimeoutMs,
+        "Webhook destination DNS lookup timed out.",
+      );
+    } catch (error) {
+      if (error instanceof WebhookDnsError) throw error;
+      throw new WebhookDnsError("Webhook destination DNS lookup failed.");
     }
   }
 }
@@ -220,6 +255,20 @@ export function classifyWebhookStatus(status: number): WebhookTransportResult {
     return { classification: "retryable", status };
   }
   return { classification: "permanent", status };
+}
+
+export function parseRetryAfter(
+  value: string | null,
+  now: Date,
+): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(Math.round(seconds * 1_000), 24 * 60 * 60 * 1_000);
+  }
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.min(Math.max(0, date - now.getTime()), 24 * 60 * 60 * 1_000);
 }
 
 export function isPublicIpAddress(address: string): boolean {
@@ -344,6 +393,84 @@ function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return body;
 }
 
+type ValidatedTarget = {
+  url: URL;
+  addresses: readonly ResolvedAddress[];
+};
+
+async function pinnedFetch(
+  value: string,
+  init: RequestInit,
+  addresses: readonly ResolvedAddress[] = [],
+): Promise<{
+  status: number;
+  headers: { get(name: string): string | null };
+  body: { cancel(): Promise<void> };
+}> {
+  const target = new URL(value);
+  const sender = target.protocol === "https:" ? requestHttps : requestHttp;
+  const address = addresses[0];
+  if (!address) throw new Error("No pinned webhook address is available.");
+  const headers = init.headers as Record<string, string>;
+  const body =
+    init.body instanceof ArrayBuffer ? Buffer.from(init.body) : Buffer.alloc(0);
+
+  return new Promise((resolve, reject) => {
+    const outgoing = sender(
+      target,
+      {
+        method: init.method,
+        headers: { ...headers, "content-length": String(body.byteLength) },
+        lookup: (_hostname, _options, callback) =>
+          callback(null, address.address, address.family),
+        servername: target.hostname,
+        signal: init.signal ?? undefined,
+      },
+      (response) => {
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: {
+            get(name: string) {
+              const header = response.headers[name.toLowerCase()];
+              return Array.isArray(header)
+                ? header.join(", ")
+                : (header ?? null);
+            },
+          },
+          body: {
+            async cancel() {
+              response.resume();
+            },
+          },
+        });
+      },
+    );
+    outgoing.once("error", reject);
+    outgoing.end(body);
+  });
+}
+
+async function withDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new WebhookDnsError(message)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function sanitizePolicyError(error: unknown): string {
   const message =
     error instanceof WebhookPolicyError
@@ -367,3 +494,4 @@ function retryable(error: string): WebhookTransportResult {
 }
 
 class WebhookPolicyError extends Error {}
+class WebhookDnsError extends Error {}

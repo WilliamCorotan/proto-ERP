@@ -9,6 +9,7 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://erp:erp@postgres:5432/erp?schema=public
       REDIS_URL: redis://redis:6379
+      WEBHOOK_SIGNING_SECRETS_JSON: ${WEBHOOK_SIGNING_SECRETS_JSON:?Webhook signing secrets must be set}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
     ports:
       - "4000:4000"

@@ -99,7 +99,6 @@ describe("IntegrationUseCases", () => {
       subscriptionId: "whsub_ops",
       eventType: "operations.lead.created",
       payload: { leadId: "lead_test" },
-      fail: false,
     });
     const retry = await useCases.retryWebhookDelivery("ten_demo", delivery.id);
     const outbox = await useCases.dispatchOutboxEvent(
