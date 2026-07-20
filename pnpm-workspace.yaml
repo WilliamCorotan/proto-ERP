@@ -4,6 +4,7 @@ packages:
   - "packages/modules/*"
 allowBuilds:
   '@prisma/engines': true
+  '@scarf/scarf': false
   esbuild: true
   msgpackr-extract: true
   prisma: true
@@ -21,5 +22,3 @@ minimumReleaseAgeExclude:
   - '@turbo/windows-64@2.10.2'
   - '@turbo/windows-arm64@2.10.2'
   - turbo@2.10.2
-ignoredBuiltDependencies:
-  - '@scarf/scarf'
