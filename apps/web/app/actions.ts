@@ -1010,7 +1010,6 @@ export async function dispatchWebhookAction(formData: FormData) {
       entityId: required(formData, "entityId"),
       source: "web-console",
     },
-    fail: formData.get("fail") === "on",
   });
   revalidatePath("/integrations");
 }

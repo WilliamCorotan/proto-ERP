@@ -1396,7 +1396,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Dispatch a webhook event to a subscription */
+        /** Enqueue a webhook event for worker delivery */
         post: operations["ErpController_dispatchWebhook"];
         delete?: never;
         options?: never;
@@ -1413,7 +1413,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry a failed webhook delivery or move it to the dead-letter queue */
+        /** Requeue a failed or dead-lettered webhook delivery */
         post: operations["ErpController_retryWebhookDelivery"];
         delete?: never;
         options?: never;
@@ -1430,7 +1430,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Dispatch a pending outbox event to subscribed webhooks */
+        /** Requeue an outbox event for worker delivery */
         post: operations["ErpController_dispatchOutboxEvent"];
         delete?: never;
         options?: never;
@@ -3261,8 +3261,6 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             };
-            /** @default false */
-            fail: boolean;
         };
         Lead: {
             id: string;

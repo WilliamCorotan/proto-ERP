@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   OutboxDispatcher,
+  EnvironmentWebhookSecretResolver,
+  retryDelayMs,
   type DispatchableOutboxEvent,
   type OutboxDispatchOutcome,
   type OutboxDispatchPort,
@@ -279,5 +281,36 @@ describe("OutboxDispatcher", () => {
     expect(port.dispatched).toEqual([
       { tenantId: "ten_demo", id: "evt_workflow_escalated", now },
     ]);
+  });
+});
+
+describe("durable webhook delivery policy", () => {
+  it("resolves worker-only signing secrets by subscription id or prefix", async () => {
+    const resolver = new EnvironmentWebhookSecretResolver(
+      JSON.stringify({ whsub_1: "id-secret", whsec_2: "prefix-secret" }),
+    );
+    await expect(
+      resolver.resolve({ id: "whsub_1", secretPrefix: "ignored" }),
+    ).resolves.toBe("id-secret");
+    await expect(
+      resolver.resolve({ id: "whsub_2", secretPrefix: "whsec_2" }),
+    ).resolves.toBe("prefix-secret");
+    await expect(
+      resolver.resolve({ id: "missing", secretPrefix: "missing" }),
+    ).resolves.toBeNull();
+  });
+
+  it("fails closed on malformed secret configuration", () => {
+    expect(() => new EnvironmentWebhookSecretResolver("[]")).toThrow(
+      "WEBHOOK_SIGNING_SECRETS_JSON must be a JSON object",
+    );
+  });
+
+  it("uses full jitter unless Retry-After provides a bounded delay", () => {
+    expect(retryDelayMs(3, undefined, () => 0.5)).toBe(2_000);
+    expect(retryDelayMs(3, 30_000, () => 0)).toBe(30_000);
+    expect(retryDelayMs(3, 48 * 60 * 60 * 1_000, () => 0)).toBe(
+      24 * 60 * 60 * 1_000,
+    );
   });
 });

@@ -709,7 +709,7 @@ describe("Sales repository workflows", () => {
     expect(printPreview.html).toContain("<h1>Invoice</h1>");
   });
 
-  it("creates API keys and dead-letters failed webhook deliveries", async () => {
+  it("creates API keys and only enqueues webhook deliveries", async () => {
     const repository = new MemoryErpRepository();
     const before = await repository.integration("ten_demo");
     const subscription = before.webhookSubscriptions[0];
@@ -722,7 +722,6 @@ describe("Sales repository workflows", () => {
       subscriptionId: subscription?.id ?? "",
       eventType: subscription?.eventTypes[0] ?? "",
       payload: { entityId: "wo-test" },
-      fail: true,
     });
     const statusBeforeRetry = delivery.status;
     const retried = await repository.retryWebhookDelivery(
@@ -732,14 +731,15 @@ describe("Sales repository workflows", () => {
     const after = await repository.integration("ten_demo");
 
     expect(apiKey.keyPrefix).toMatch(/^erp_/);
-    expect(statusBeforeRetry).toBe("failed");
-    expect(retried.status).toBe("dead_letter");
+    expect(statusBeforeRetry).toBe("pending");
+    expect(retried.status).toBe("pending");
+    expect(retried.attempts).toBe(0);
     expect(
       after.deadLetters.some((record) => record.deliveryId === delivery.id),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("buffers business events in the outbox and dispatches them to webhooks", async () => {
+  it("buffers business events and leaves HTTP dispatch to the worker", async () => {
     const repository = new MemoryErpRepository();
 
     const lead = await repository.createLead("ten_demo", {
@@ -762,37 +762,24 @@ describe("Sales repository workflows", () => {
 
     expect(lead.stage).toBe("new");
     expect(statusBeforeDispatch).toBe("pending");
-    expect(dispatched.status).toBe("dispatched");
+    expect(dispatched.status).toBe("pending");
     expect(
       after.webhookDeliveries.some(
         (delivery) => delivery.eventType === "operations.lead.created",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("dead-letters outbox events after max attempts", async () => {
+  it("requeues outbox events without manufacturing worker outcomes", async () => {
     const repository = new MemoryErpRepository();
     const event = await repository.publishOutboxEvent("ten_demo", {
       eventType: "integration.unsubscribed-event",
       payload: { entityId: "evt-test" },
     });
 
-    await repository.dispatchOutboxEvent("ten_demo", event.id);
-    await repository.dispatchOutboxEvent("ten_demo", event.id);
-    const deadLettered = await repository.dispatchOutboxEvent(
-      "ten_demo",
-      event.id,
-    );
-    const integration = await repository.integration("ten_demo");
-
-    expect(deadLettered.status).toBe("dead_letter");
-    expect(deadLettered.attempts).toBe(3);
-    expect(integration.deadLetters).toEqual([
-      expect.objectContaining({
-        deliveryId: null,
-        outboxEventId: event.id,
-      }),
-    ]);
+    const requeued = await repository.dispatchOutboxEvent("ten_demo", event.id);
+    expect(requeued.status).toBe("pending");
+    expect(requeued.attempts).toBe(0);
   });
 
   it("executes WMS pick, pack, ship, and put-away workflows", async () => {

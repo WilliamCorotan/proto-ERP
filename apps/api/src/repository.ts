@@ -1,5 +1,5 @@
 import { createPrismaClient } from "@erp/db";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   Account,
   AccountingSnapshot,
@@ -494,7 +494,6 @@ export type DispatchWebhookInput = {
   subscriptionId: string;
   eventType: string;
   payload: Record<string, unknown>;
-  fail: boolean;
 };
 
 export type PublishOutboxEventInput = {
@@ -651,8 +650,6 @@ export type EnsureWorkflowInstanceInput = WorkflowInstanceLookupInput & {
 export type PersistedDocumentTransitionInput = DocumentTransitionInput & {
   workflowTransition?: WorkflowTransitionRecord | undefined;
 };
-
-const OUTBOX_MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS ?? 3);
 
 type WorkflowPersistenceClient = Pick<
   Prisma.TransactionClient,
@@ -3481,12 +3478,13 @@ export class MemoryErpRepository implements ErpRepository {
       id: todayId("whdel", this.integrationData.webhookDeliveries.length),
       subscriptionId: subscription.id,
       eventType: input.eventType,
-      status: input.fail ? "failed" : "delivered",
-      attempts: 1,
-      nextAttemptAt: input.fail ? daysFromNow(1).toISOString() : null,
-      deliveredAt: input.fail ? null : new Date().toISOString(),
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: new Date().toISOString(),
+      deliveredAt: null,
     };
     this.integrationData.webhookDeliveries.unshift(delivery);
+    this.publishMemoryOutboxEvent(input.eventType, input.payload);
     this.recordMemoryAudit(
       "WebhookDelivery",
       delivery.id,
@@ -3506,36 +3504,18 @@ export class MemoryErpRepository implements ErpRepository {
     if (!delivery) {
       throw new Error(`Webhook delivery not found: ${deliveryId}`);
     }
-    if (delivery.status === "delivered" || delivery.status === "dead_letter") {
+    if (delivery.status === "delivered" || delivery.status === "pending") {
       return delivery;
     }
-    delivery.attempts += 1;
-    if (delivery.attempts >= 2) {
-      delivery.status = "dead_letter";
-      delivery.nextAttemptAt = null;
-      this.integrationData.deadLetters.unshift({
-        id: todayId("dlq", this.integrationData.deadLetters.length),
-        deliveryId: delivery.id,
-        outboxEventId: null,
-        reason: `Webhook ${delivery.eventType} failed after ${delivery.attempts} attempts.`,
-        createdAt: new Date().toISOString(),
-      });
-      this.recordMemoryAudit(
-        "WebhookDelivery",
-        delivery.id,
-        "dead-lettered",
-        `Webhook ${delivery.eventType} moved to dead letter.`,
-      );
-      return delivery;
-    }
-    delivery.status = "delivered";
-    delivery.deliveredAt = new Date().toISOString();
-    delivery.nextAttemptAt = null;
+    delivery.status = "pending";
+    delivery.deliveredAt = null;
+    delivery.nextAttemptAt = new Date().toISOString();
+    removeMatchingDeadLetters(this.integrationData.deadLetters, delivery.id);
     this.recordMemoryAudit(
       "WebhookDelivery",
       delivery.id,
-      "delivered",
-      `Webhook ${delivery.eventType} delivered on retry.`,
+      "requeued",
+      `Webhook ${delivery.eventType} requeued for worker delivery.`,
     );
     return delivery;
   }
@@ -3557,61 +3537,22 @@ export class MemoryErpRepository implements ErpRepository {
     if (!event) {
       throw new Error(`Outbox event not found: ${outboxEventId}`);
     }
-    if (event.status === "dispatched") {
+    if (event.status === "pending") {
       return event;
     }
-    if (event.status === "dead_letter") {
-      return event;
-    }
-    const subscriptions = this.integrationData.webhookSubscriptions.filter(
-      (subscription) =>
-        subscription.active &&
-        subscription.eventTypes.includes(event.eventType),
-    );
-    event.attempts += 1;
-    if (subscriptions.length === 0) {
-      if (event.attempts >= OUTBOX_MAX_ATTEMPTS) {
-        event.status = "dead_letter";
-        event.error = `No active webhook subscriptions for ${event.eventType}.`;
-        this.integrationData.deadLetters.unshift({
-          id: todayId("dlq", this.integrationData.deadLetters.length),
-          deliveryId: null,
-          outboxEventId: event.id,
-          reason: `Outbox ${event.eventType} failed after ${event.attempts} attempts: ${event.error}`,
-          createdAt: new Date().toISOString(),
-        });
-        this.recordMemoryAudit(
-          "OutboxEvent",
-          event.id,
-          "dead-lettered",
-          `Outbox event ${event.eventType} moved to dead letter.`,
-        );
-        return event;
-      }
-      event.status = "failed";
-      event.error = `No active webhook subscriptions for ${event.eventType}.`;
-      this.recordMemoryAudit("OutboxEvent", event.id, "failed", event.error);
-      return event;
-    }
-    for (const subscription of subscriptions) {
-      this.integrationData.webhookDeliveries.unshift({
-        id: todayId("whdel", this.integrationData.webhookDeliveries.length),
-        subscriptionId: subscription.id,
-        eventType: event.eventType,
-        status: "delivered",
-        attempts: 1,
-        nextAttemptAt: null,
-        deliveredAt: new Date().toISOString(),
-      });
-    }
-    event.status = "dispatched";
+    event.status = "pending";
     event.error = null;
-    event.dispatchedAt = new Date().toISOString();
+    event.dispatchedAt = null;
+    removeMatchingDeadLetters(
+      this.integrationData.deadLetters,
+      undefined,
+      event.id,
+    );
     this.recordMemoryAudit(
       "OutboxEvent",
       event.id,
-      "dispatched",
-      `Outbox event ${event.eventType} dispatched.`,
+      "requeued",
+      `Outbox event ${event.eventType} requeued for worker delivery.`,
     );
     return event;
   }
@@ -5637,7 +5578,7 @@ export class MemoryErpRepository implements ErpRepository {
 }
 
 export class PrismaErpRepository implements ErpRepository {
-  private readonly prisma = createPrismaClient();
+  constructor(private readonly prisma: PrismaClient = createPrismaClient()) {}
 
   async readiness(): Promise<void> {
     await this.prisma.$queryRaw`SELECT 1`;
@@ -9936,17 +9877,31 @@ export class PrismaErpRepository implements ErpRepository {
         `Webhook subscription ${subscription.id} is not subscribed to ${input.eventType}.`,
       );
     }
-    const delivery = await this.prisma.webhookDelivery.create({
-      data: {
-        tenantId,
-        subscriptionId: subscription.id,
-        eventType: input.eventType,
-        status: input.fail ? "failed" : "delivered",
-        attempts: 1,
-        nextAttemptAt: input.fail ? daysFromNow(1) : null,
-        deliveredAt: input.fail ? null : new Date(),
-        payload: input.payload as Prisma.InputJsonValue,
-      },
+    const delivery = await this.prisma.$transaction(async (tx) => {
+      const outbox = await tx.outboxEvent.create({
+        data: {
+          tenantId,
+          subscriptionId: subscription.id,
+          eventType: input.eventType,
+          payload: input.payload as Prisma.InputJsonValue,
+          status: "pending",
+          attempts: 0,
+        },
+      });
+      return tx.webhookDelivery.create({
+        data: {
+          tenantId,
+          subscriptionId: subscription.id,
+          outboxEventId: outbox.id,
+          eventType: input.eventType,
+          status: "pending",
+          attempts: 0,
+          nextAttemptAt: new Date(),
+          deliveredAt: null,
+          payload: input.payload as Prisma.InputJsonValue,
+          payloadBody: JSON.stringify(input.payload),
+        },
+      });
     });
     await this.recordAudit(
       tenantId,
@@ -9965,53 +9920,50 @@ export class PrismaErpRepository implements ErpRepository {
     const before = await this.prisma.webhookDelivery.findFirstOrThrow({
       where: { id: deliveryId, tenantId },
     });
-    if (before.status === "delivered" || before.status === "dead_letter") {
+    if (before.status === "delivered" || before.status === "pending") {
       return mapWebhookDelivery(before);
     }
-    const nextAttempts = before.attempts + 1;
-    if (nextAttempts >= 2) {
-      const delivery = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.webhookDelivery.update({
-          where: { id: before.id },
-          data: {
-            attempts: nextAttempts,
-            status: "dead_letter",
-            nextAttemptAt: null,
-          },
-        });
-        await tx.deadLetterRecord.create({
-          data: {
-            tenantId,
-            deliveryId: updated.id,
-            reason: `Webhook ${updated.eventType} failed after ${nextAttempts} attempts.`,
-          },
-        });
-        return updated;
+    const delivery = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.webhookDelivery.update({
+        where: { id: before.id },
+        data: {
+          status: "pending",
+          nextAttemptAt: new Date(),
+          deliveredAt: null,
+          lockedAt: null,
+          lastError: null,
+        },
       });
-      await this.recordAudit(
-        tenantId,
-        "WebhookDelivery",
-        delivery.id,
-        "dead-lettered",
-        `Webhook ${delivery.eventType} moved to dead letter.`,
-      );
-      return mapWebhookDelivery(delivery);
-    }
-    const delivery = await this.prisma.webhookDelivery.update({
-      where: { id: before.id },
-      data: {
-        attempts: nextAttempts,
-        status: "delivered",
-        nextAttemptAt: null,
-        deliveredAt: new Date(),
-      },
+      if (updated.outboxEventId) {
+        await tx.outboxEvent.update({
+          where: { id: updated.outboxEventId },
+          data: {
+            status: "pending",
+            lockedAt: null,
+            nextAttemptAt: null,
+            error: null,
+            dispatchedAt: null,
+          },
+        });
+      }
+      await tx.deadLetterRecord.deleteMany({
+        where: {
+          OR: [
+            { deliveryId: updated.id },
+            ...(updated.outboxEventId
+              ? [{ outboxEventId: updated.outboxEventId }]
+              : []),
+          ],
+        },
+      });
+      return updated;
     });
     await this.recordAudit(
       tenantId,
       "WebhookDelivery",
       delivery.id,
-      "delivered",
-      `Webhook ${delivery.eventType} delivered on retry.`,
+      "requeued",
+      `Webhook ${delivery.eventType} requeued for worker delivery.`,
     );
     return mapWebhookDelivery(delivery);
   }
@@ -10111,96 +10063,53 @@ export class PrismaErpRepository implements ErpRepository {
     const event = await this.prisma.outboxEvent.findFirstOrThrow({
       where: { id: outboxEventId, tenantId },
     });
-    if (event.status === "dispatched") {
+    if (event.status === "pending") {
       return mapOutboxEvent(event);
-    }
-    if (event.status === "dead_letter") {
-      return mapOutboxEvent(event);
-    }
-    const subscriptions = await this.prisma.webhookSubscription.findMany({
-      where: { tenantId, active: true, eventTypes: { has: event.eventType } },
-    });
-    const nextAttempts = event.attempts + 1;
-    if (subscriptions.length === 0) {
-      const error = `No active webhook subscriptions for ${event.eventType}.`;
-      if (nextAttempts >= OUTBOX_MAX_ATTEMPTS) {
-        const deadLettered = await this.prisma.$transaction(async (tx) => {
-          const updated = await tx.outboxEvent.update({
-            where: { id: event.id },
-            data: {
-              attempts: nextAttempts,
-              status: "dead_letter",
-              error,
-              lockedAt: null,
-            },
-          });
-          await tx.deadLetterRecord.create({
-            data: {
-              tenantId,
-              outboxEventId: updated.id,
-              reason: `Outbox ${updated.eventType} failed after ${nextAttempts} attempts: ${error}`,
-            },
-          });
-          return updated;
-        });
-        await this.recordAudit(
-          tenantId,
-          "OutboxEvent",
-          deadLettered.id,
-          "dead-lettered",
-          `Outbox event ${deadLettered.eventType} moved to dead letter.`,
-        );
-        return mapOutboxEvent(deadLettered);
-      }
-      const failed = await this.prisma.outboxEvent.update({
-        where: { id: event.id },
-        data: {
-          attempts: nextAttempts,
-          status: "failed",
-          error,
-        },
-      });
-      await this.recordAudit(
-        tenantId,
-        "OutboxEvent",
-        failed.id,
-        "failed",
-        failed.error ?? `Outbox event ${event.eventType} failed.`,
-      );
-      return mapOutboxEvent(failed);
     }
     const dispatched = await this.prisma.$transaction(async (tx) => {
-      for (const subscription of subscriptions) {
-        await tx.webhookDelivery.create({
-          data: {
-            tenantId,
-            subscriptionId: subscription.id,
-            eventType: event.eventType,
-            status: "delivered",
-            attempts: 1,
-            deliveredAt: new Date(),
-            nextAttemptAt: null,
-            payload: event.payload as Prisma.InputJsonValue,
-          },
-        });
-      }
-      return tx.outboxEvent.update({
+      const deliveries = await tx.webhookDelivery.findMany({
+        where: { tenantId, outboxEventId: event.id },
+        select: { id: true },
+      });
+      const updated = await tx.outboxEvent.update({
         where: { id: event.id },
         data: {
-          attempts: nextAttempts,
-          status: "dispatched",
+          status: "pending",
           error: null,
           lockedAt: null,
-          dispatchedAt: new Date(),
+          nextAttemptAt: null,
+          dispatchedAt: null,
         },
       });
+      await tx.webhookDelivery.updateMany({
+        where: {
+          tenantId,
+          outboxEventId: event.id,
+          status: { in: ["failed", "dead_letter"] },
+        },
+        data: {
+          status: "pending",
+          nextAttemptAt: new Date(),
+          lockedAt: null,
+          lastError: null,
+        },
+      });
+      await tx.deadLetterRecord.deleteMany({
+        where: {
+          OR: [
+            { outboxEventId: event.id },
+            { deliveryId: { in: deliveries.map((delivery) => delivery.id) } },
+          ],
+        },
+      });
+      return updated;
     });
     await this.recordAudit(
       tenantId,
       "OutboxEvent",
       dispatched.id,
-      "dispatched",
-      `Outbox event ${dispatched.eventType} dispatched.`,
+      "requeued",
+      `Outbox event ${dispatched.eventType} requeued for worker delivery.`,
     );
     return mapOutboxEvent(dispatched);
   }
@@ -15283,6 +15192,23 @@ function attendanceHours(checkIn: string, checkOut: string): number {
     throw new Error("Attendance check-out must be after check-in.");
   }
   return Math.round(((end - start) / 3_600_000) * 100) / 100;
+}
+
+function removeMatchingDeadLetters(
+  records: DeadLetterRecord[],
+  deliveryId?: string,
+  outboxEventId?: string,
+): void {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    if (
+      record &&
+      ((deliveryId !== undefined && record.deliveryId === deliveryId) ||
+        (outboxEventId !== undefined && record.outboxEventId === outboxEventId))
+    ) {
+      records.splice(index, 1);
+    }
+  }
 }
 
 function buildTrialBalance(

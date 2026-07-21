@@ -2660,7 +2660,7 @@ export class ErpController {
 
   @ApiTags("integrations")
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Dispatch a webhook event to a subscription" })
+  @ApiOperation({ summary: "Enqueue a webhook event for worker delivery" })
   @ApiBody({ schema: ref("DispatchWebhookRequest") })
   @ApiCreatedResponse({ schema: ref("WebhookDelivery") })
   @ApiUnauthorizedResponse({ schema: ref("ErrorResponse") })
@@ -2680,8 +2680,7 @@ export class ErpController {
   @ApiTags("integrations")
   @ApiBearerAuth()
   @ApiOperation({
-    summary:
-      "Retry a failed webhook delivery or move it to the dead-letter queue",
+    summary: "Requeue a failed or dead-lettered webhook delivery",
   })
   @ApiParam({ name: "id", schema: { type: "string" } })
   @ApiOkResponse({ schema: ref("WebhookDelivery") })
@@ -2703,7 +2702,7 @@ export class ErpController {
   @ApiTags("integrations")
   @ApiBearerAuth()
   @ApiOperation({
-    summary: "Dispatch a pending outbox event to subscribed webhooks",
+    summary: "Requeue an outbox event for worker delivery",
   })
   @ApiParam({ name: "id", schema: { type: "string" } })
   @ApiOkResponse({ schema: ref("OutboxEvent") })

@@ -3,6 +3,7 @@ import {
   SecureWebhookTransport,
   classifyWebhookStatus,
   isPublicIpAddress,
+  parseRetryAfter,
   signWebhookPayload,
   type WebhookDnsResolver,
   type WebhookFetch,
@@ -27,10 +28,30 @@ afterEach(() => {
 });
 
 describe("webhook signing and request contract", () => {
-  it("signs timestamp dot raw-body bytes with the known HMAC vector", () => {
-    expect(signWebhookPayload("test-secret", "1700000000", rawBody)).toBe(
-      "53b38c0fab3b48693f4ff01785fcc8679cabda46a7aeed6fab2195a0257fb2d7",
+  const signatureInput = {
+    timestamp: "1700000000",
+    deliveryId: request.deliveryId,
+    eventId: request.eventId,
+    eventType: request.eventType,
+    rawBody,
+  };
+
+  it("signs versioned delivery metadata and raw-body bytes with a known HMAC vector", () => {
+    expect(signWebhookPayload("test-secret", signatureInput)).toBe(
+      "bddec66da43e7c79a2d6192b0db2738e6b02a1db27914d07b8df25215fdc5390",
     );
+  });
+
+  it.each([
+    ["delivery id", { deliveryId: "del_tampered" }],
+    ["event id", { eventId: "evt_tampered" }],
+    ["event type", { eventType: "sales.order.cancelled" }],
+    ["timestamp", { timestamp: "1700000001" }],
+  ])("rejects a signature when the %s is changed", (_label, change) => {
+    const signature = signWebhookPayload("test-secret", signatureInput);
+    expect(
+      signWebhookPayload("test-secret", { ...signatureInput, ...change }),
+    ).not.toBe(signature);
   });
 
   it("sends stable headers and raw bytes without following redirects", async () => {
@@ -56,9 +77,13 @@ describe("webhook signing and request contract", () => {
       "x-erp-event": "sales.order.approved",
       "x-erp-event-id": "evt_001",
       "x-erp-signature":
-        "v1=53b38c0fab3b48693f4ff01785fcc8679cabda46a7aeed6fab2195a0257fb2d7",
+        "v1=bddec66da43e7c79a2d6192b0db2738e6b02a1db27914d07b8df25215fdc5390",
+      "x-erp-signature-version": "v1",
       "x-erp-timestamp": "1700000000",
     });
+    expect(fetch.mock.calls[0]?.[2]).toEqual([
+      { address: "8.8.8.8", family: 4 },
+    ]);
   });
 });
 
@@ -108,6 +133,34 @@ describe("webhook destination policy", () => {
       error: "Webhook destination resolves to a non-public address.",
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("classifies transient DNS failure as retryable", async () => {
+    const transport = new SecureWebhookTransport({
+      fetch: vi.fn<WebhookFetch>(),
+      resolver: vi.fn().mockRejectedValue(new Error("EAI_AGAIN")),
+      production: true,
+    });
+    await expect(transport.send(request)).resolves.toEqual({
+      classification: "retryable",
+      error: "Webhook destination DNS lookup failed.",
+    });
+  });
+
+  it("bounds DNS resolution independently from the HTTP deadline", async () => {
+    vi.useFakeTimers();
+    const transport = new SecureWebhookTransport({
+      fetch: vi.fn<WebhookFetch>(),
+      resolver: vi.fn<WebhookDnsResolver>(() => new Promise(() => undefined)),
+      production: true,
+      dnsTimeoutMs: 100,
+    });
+    const pending = transport.send(request);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(pending).resolves.toEqual({
+      classification: "retryable",
+      error: "Webhook destination DNS lookup timed out.",
+    });
   });
 
   it.each([
@@ -227,6 +280,34 @@ describe("webhook response classification and bounds", () => {
     });
     expect(JSON.stringify(result)).not.toContain(request.secret);
     expect(result.error?.length).toBeLessThanOrEqual(256);
+  });
+
+  it("drains response bodies and honors bounded Retry-After metadata", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const fetch = vi.fn<WebhookFetch>().mockResolvedValue({
+      status: 429,
+      headers: { get: () => "120" },
+      body: { cancel },
+    });
+    const transport = new SecureWebhookTransport({
+      fetch,
+      resolver: publicResolver,
+      production: true,
+      now: () => new Date("2026-07-21T00:00:00.000Z"),
+    });
+    await expect(transport.send(request)).resolves.toEqual({
+      classification: "retryable",
+      status: 429,
+      retryAfterMs: 120_000,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("parses delta and HTTP-date Retry-After values", () => {
+    const now = new Date("2026-07-21T00:00:00.000Z");
+    expect(parseRetryAfter("2", now)).toBe(2_000);
+    expect(parseRetryAfter("Tue, 21 Jul 2026 00:01:00 GMT", now)).toBe(60_000);
+    expect(parseRetryAfter("invalid", now)).toBeUndefined();
   });
 
   it.each([999, 30_001])("rejects timeout configuration %i", (timeoutMs) => {

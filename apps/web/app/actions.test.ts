@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  cookieGet: vi.fn(),
   cookieSet: vi.fn(),
+  dispatchWebhook: vi.fn(),
   login: vi.fn(),
   redirect: vi.fn(),
   revalidatePath: vi.fn(),
@@ -10,23 +12,26 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/headers", () => ({
   cookies: vi.fn().mockResolvedValue({
-    get: () => undefined,
+    get: mocks.cookieGet,
     set: mocks.cookieSet,
   }),
 }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@erp/sdk", () => ({
   ErpClient: class {
+    dispatchWebhook = mocks.dispatchWebhook;
     login = mocks.login;
   },
 }));
 
-import { loginAction } from "./actions";
+import { dispatchWebhookAction, loginAction } from "./actions";
 
 describe("loginAction", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "production");
     mocks.cookieSet.mockReset();
+    mocks.cookieGet.mockReset();
+    mocks.dispatchWebhook.mockReset().mockResolvedValue({ status: "pending" });
     mocks.login.mockReset().mockResolvedValue({ token: "session-token" });
     mocks.redirect.mockReset();
     mocks.revalidatePath.mockReset();
@@ -64,6 +69,31 @@ describe("loginAction", () => {
       "session-token",
       expect.objectContaining({ secure: false }),
     );
+  });
+});
+
+describe("dispatchWebhookAction", () => {
+  beforeEach(() => {
+    mocks.cookieGet.mockReset().mockReturnValue({ value: "session-token" });
+    mocks.dispatchWebhook.mockReset().mockResolvedValue({ status: "pending" });
+    mocks.revalidatePath.mockReset();
+  });
+
+  it("enqueues a webhook without accepting a simulated outcome", async () => {
+    const formData = new FormData();
+    formData.set("subscriptionId", "whsub_ops");
+    formData.set("eventType", "operations.lead.created");
+    formData.set("entityId", "lead_123");
+    formData.set("fail", "on");
+
+    await dispatchWebhookAction(formData);
+
+    expect(mocks.dispatchWebhook).toHaveBeenCalledWith({
+      subscriptionId: "whsub_ops",
+      eventType: "operations.lead.created",
+      payload: { entityId: "lead_123", source: "web-console" },
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/integrations");
   });
 });
 

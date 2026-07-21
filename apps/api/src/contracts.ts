@@ -2827,7 +2827,6 @@ export const openApiSchemas: Record<string, unknown> = {
       subscriptionId: { type: "string" },
       eventType: { type: "string" },
       payload: { type: "object", additionalProperties: true },
-      fail: { type: "boolean", default: false },
     },
   },
   Lead: {
