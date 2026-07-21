@@ -64,8 +64,8 @@ export async function seedTwoTenantFixture(prisma: PrismaClient) {
     });
     await tx.userRole.createMany({
       data: [
-        { userId: ids.users.alpha, roleId: ids.roles.alpha },
-        { userId: ids.users.beta, roleId: ids.roles.beta },
+        { tenantId: ids.tenants.alpha, userId: ids.users.alpha, roleId: ids.roles.alpha },
+        { tenantId: ids.tenants.beta, userId: ids.users.beta, roleId: ids.roles.beta },
       ],
     });
     await tx.customer.createMany({
