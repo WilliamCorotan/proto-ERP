@@ -239,13 +239,18 @@ export async function getSalesSnapshot(): Promise<SalesSnapshot> {
   }
 }
 
-export async function getSalesCustomersPage(): Promise<SalesCustomerPage> {
+export async function getSalesCustomersPage(
+  after?: string,
+): Promise<SalesCustomerPage> {
   const token = requireSessionToken(
     (await cookies()).get("erp_token")?.value,
     "sales customers",
   );
   try {
-    return await new ErpClient(apiUrl, token).salesCustomers({ limit: 100 });
+    return await new ErpClient(apiUrl, token).salesCustomers({
+      ...(after ? { after } : {}),
+      limit: 100,
+    });
   } catch (error) {
     return demoFallbackOrThrow(error, () => ({
       items: demoSalesData.customers,

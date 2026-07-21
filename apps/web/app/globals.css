@@ -538,6 +538,13 @@ main {
   margin-bottom: 18px;
 }
 
+.customer-page-navigation {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 .ds-card-title,
 .panel h2 {
   margin: 4px 0 0;
