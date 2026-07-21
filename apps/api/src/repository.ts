@@ -1,5 +1,5 @@
 import { createPrismaClient } from "@erp/db";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   Account,
   AccountingSnapshot,
@@ -3510,6 +3510,7 @@ export class MemoryErpRepository implements ErpRepository {
     delivery.status = "pending";
     delivery.deliveredAt = null;
     delivery.nextAttemptAt = new Date().toISOString();
+    removeMatchingDeadLetters(this.integrationData.deadLetters, delivery.id);
     this.recordMemoryAudit(
       "WebhookDelivery",
       delivery.id,
@@ -3542,6 +3543,11 @@ export class MemoryErpRepository implements ErpRepository {
     event.status = "pending";
     event.error = null;
     event.dispatchedAt = null;
+    removeMatchingDeadLetters(
+      this.integrationData.deadLetters,
+      undefined,
+      event.id,
+    );
     this.recordMemoryAudit(
       "OutboxEvent",
       event.id,
@@ -5572,7 +5578,7 @@ export class MemoryErpRepository implements ErpRepository {
 }
 
 export class PrismaErpRepository implements ErpRepository {
-  private readonly prisma = createPrismaClient();
+  constructor(private readonly prisma: PrismaClient = createPrismaClient()) {}
 
   async readiness(): Promise<void> {
     await this.prisma.$queryRaw`SELECT 1`;
@@ -9934,11 +9940,22 @@ export class PrismaErpRepository implements ErpRepository {
           data: {
             status: "pending",
             lockedAt: null,
+            nextAttemptAt: null,
             error: null,
             dispatchedAt: null,
           },
         });
       }
+      await tx.deadLetterRecord.deleteMany({
+        where: {
+          OR: [
+            { deliveryId: updated.id },
+            ...(updated.outboxEventId
+              ? [{ outboxEventId: updated.outboxEventId }]
+              : []),
+          ],
+        },
+      });
       return updated;
     });
     await this.recordAudit(
@@ -10050,12 +10067,17 @@ export class PrismaErpRepository implements ErpRepository {
       return mapOutboxEvent(event);
     }
     const dispatched = await this.prisma.$transaction(async (tx) => {
+      const deliveries = await tx.webhookDelivery.findMany({
+        where: { tenantId, outboxEventId: event.id },
+        select: { id: true },
+      });
       const updated = await tx.outboxEvent.update({
         where: { id: event.id },
         data: {
           status: "pending",
           error: null,
           lockedAt: null,
+          nextAttemptAt: null,
           dispatchedAt: null,
         },
       });
@@ -10070,6 +10092,14 @@ export class PrismaErpRepository implements ErpRepository {
           nextAttemptAt: new Date(),
           lockedAt: null,
           lastError: null,
+        },
+      });
+      await tx.deadLetterRecord.deleteMany({
+        where: {
+          OR: [
+            { outboxEventId: event.id },
+            { deliveryId: { in: deliveries.map((delivery) => delivery.id) } },
+          ],
         },
       });
       return updated;
@@ -15162,6 +15192,23 @@ function attendanceHours(checkIn: string, checkOut: string): number {
     throw new Error("Attendance check-out must be after check-in.");
   }
   return Math.round(((end - start) / 3_600_000) * 100) / 100;
+}
+
+function removeMatchingDeadLetters(
+  records: DeadLetterRecord[],
+  deliveryId?: string,
+  outboxEventId?: string,
+): void {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    if (
+      record &&
+      ((deliveryId !== undefined && record.deliveryId === deliveryId) ||
+        (outboxEventId !== undefined && record.outboxEventId === outboxEventId))
+    ) {
+      records.splice(index, 1);
+    }
+  }
 }
 
 function buildTrialBalance(

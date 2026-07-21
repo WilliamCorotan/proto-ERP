@@ -110,11 +110,13 @@ export class SecureWebhookTransport {
     }
 
     const timestamp = String(Math.floor(this.now().getTime() / 1_000));
-    const signature = signWebhookPayload(
-      request.secret,
+    const signature = signWebhookPayload(request.secret, {
       timestamp,
-      request.rawBody,
-    );
+      deliveryId: request.deliveryId,
+      eventId: request.eventId,
+      eventType: request.eventType,
+      rawBody: request.rawBody,
+    });
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), this.timeoutMs);
     const requestBody = copyToArrayBuffer(request.rawBody);
@@ -237,14 +239,27 @@ export class SecureWebhookTransport {
 
 export function signWebhookPayload(
   secret: string,
-  timestamp: string,
-  rawBody: Uint8Array,
+  input: Pick<
+    WebhookTransportRequest,
+    "deliveryId" | "eventId" | "eventType" | "rawBody"
+  > & { timestamp: string },
 ): string {
+  const metadata = [
+    "v1",
+    input.timestamp,
+    encodeSignatureField(input.deliveryId),
+    encodeSignatureField(input.eventId),
+    encodeSignatureField(input.eventType),
+  ].join(".");
   return createHmac("sha256", secret)
-    .update(timestamp, "utf8")
+    .update(metadata, "utf8")
     .update(".", "utf8")
-    .update(rawBody)
+    .update(input.rawBody)
     .digest("hex");
+}
+
+function encodeSignatureField(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
 }
 
 export function classifyWebhookStatus(status: number): WebhookTransportResult {

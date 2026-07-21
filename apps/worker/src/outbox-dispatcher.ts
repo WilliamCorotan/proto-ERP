@@ -52,6 +52,8 @@ export type WebhookSecretResolver = {
   }): Promise<string | null>;
 };
 
+export type WebhookTransportPort = Pick<SecureWebhookTransport, "send">;
+
 export class EnvironmentWebhookSecretResolver implements WebhookSecretResolver {
   private readonly secrets: Record<string, string>;
 
@@ -119,7 +121,7 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
 
   constructor(
     private readonly prisma: PrismaClient = createPrismaClient(),
-    private readonly transport = new SecureWebhookTransport(),
+    private readonly transport: WebhookTransportPort = new SecureWebhookTransport(),
     private readonly secretResolver: WebhookSecretResolver = new EnvironmentWebhookSecretResolver(),
     private readonly random: () => number = Math.random,
   ) {
@@ -140,8 +142,18 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
     const lockExpiredBefore = new Date(now.getTime() - this.leaseMs);
     const candidates = await this.prisma.outboxEvent.findMany({
       where: {
-        status: { in: ["pending", "failed"] },
-        OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiredBefore } }],
+        AND: [
+          {
+            OR: [
+              { status: "pending" },
+              {
+                status: "failed",
+                OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+              },
+            ],
+          },
+          { OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiredBefore } }] },
+        ],
       },
       orderBy: { createdAt: "asc" },
       take: limit,
@@ -151,8 +163,23 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
       const result = await this.prisma.outboxEvent.updateMany({
         where: {
           id: event.id,
-          status: event.status,
-          OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiredBefore } }],
+          AND: [
+            {
+              OR: [
+                { status: "pending" },
+                {
+                  status: "failed",
+                  OR: [
+                    { nextAttemptAt: null },
+                    { nextAttemptAt: { lte: now } },
+                  ],
+                },
+              ],
+            },
+            {
+              OR: [{ lockedAt: null }, { lockedAt: { lt: lockExpiredBefore } }],
+            },
+          ],
         },
         data: { lockedAt: now },
       });
@@ -190,7 +217,7 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
       orderBy: { id: "asc" },
     });
     if (subscriptions.length === 0) {
-      return this.failOutboxWithoutSubscriptions(event);
+      return this.failOutboxWithoutSubscriptions(event, now);
     }
 
     const payloadBody = JSON.stringify(event.payload ?? {});
@@ -272,17 +299,22 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
         } satisfies WebhookTransportResult);
     const attempts = delivery.attempts + 1;
     if (result.classification === "delivered") {
-      await this.prisma.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: "delivered",
-          attempts,
-          deliveredAt: now,
-          nextAttemptAt: null,
-          lockedAt: null,
-          lastError: null,
-          responseStatus: result.status ?? null,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.webhookDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: "delivered",
+            attempts,
+            deliveredAt: now,
+            nextAttemptAt: null,
+            lockedAt: null,
+            lastError: null,
+            responseStatus: result.status ?? null,
+          },
+        });
+        await tx.deadLetterRecord.deleteMany({
+          where: { deliveryId: delivery.id },
+        });
       });
       return;
     }
@@ -345,41 +377,61 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
     const terminalFailure = deliveries.some(
       (delivery) => delivery.status === "dead_letter",
     );
+    const retryable = deliveries.filter(
+      (delivery) =>
+        delivery.status === "pending" || delivery.status === "failed",
+    );
     const delivered = deliveries.every(
       (delivery) => delivery.status === "delivered",
     );
-    const status = terminalFailure
-      ? "dead_letter"
-      : delivered
-        ? "dispatched"
-        : "failed";
-    await this.prisma.outboxEvent.update({
-      where: { id },
-      data: {
-        status,
-        attempts,
-        lockedAt: null,
-        dispatchedAt: delivered ? now : null,
-        error: terminalFailure
-          ? "One or more webhook deliveries were dead-lettered."
-          : delivered
-            ? null
-            : "One or more webhook deliveries remain retryable.",
+    const status =
+      retryable.length > 0
+        ? "failed"
+        : delivered
+          ? "dispatched"
+          : "dead_letter";
+    const nextAttemptAt = retryable.reduce<Date | null>(
+      (earliest, delivery) => {
+        const due = delivery.nextAttemptAt ?? now;
+        return !earliest || due < earliest ? due : earliest;
       },
-    });
-    if (terminalFailure) {
-      await this.prisma.deadLetterRecord.upsert({
-        where: { outboxEventId: id },
-        update: {
-          reason: `Outbox ${eventType} has a dead-lettered webhook delivery.`,
-        },
-        create: {
-          tenantId,
-          outboxEventId: id,
-          reason: `Outbox ${eventType} has a dead-lettered webhook delivery.`,
+      null,
+    );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.outboxEvent.update({
+        where: { id },
+        data: {
+          status,
+          attempts,
+          lockedAt: null,
+          nextAttemptAt: status === "failed" ? nextAttemptAt : null,
+          dispatchedAt: delivered ? now : null,
+          error:
+            status === "dead_letter"
+              ? "One or more webhook deliveries were dead-lettered."
+              : status === "failed"
+                ? terminalFailure
+                  ? "Retryable deliveries remain after another delivery was dead-lettered."
+                  : "One or more webhook deliveries remain retryable."
+                : null,
         },
       });
-    }
+      if (status === "dead_letter") {
+        await tx.deadLetterRecord.upsert({
+          where: { outboxEventId: id },
+          update: {
+            reason: `Outbox ${eventType} has a dead-lettered webhook delivery.`,
+          },
+          create: {
+            tenantId,
+            outboxEventId: id,
+            reason: `Outbox ${eventType} has a dead-lettered webhook delivery.`,
+          },
+        });
+      } else if (status === "dispatched") {
+        await tx.deadLetterRecord.deleteMany({ where: { outboxEventId: id } });
+      }
+    });
     return { id, eventType, status, attempts };
   }
 
@@ -390,16 +442,23 @@ export class PrismaOutboxDispatchPort implements OutboxDispatchPort {
       eventType: string;
       attempts: number;
     },
+    now: Date,
   ): Promise<OutboxDispatchOutcome> {
     const attempts = event.attempts + 1;
     const terminal = attempts >= this.maxAttempts;
     const error = `No active webhook subscriptions for ${event.eventType}.`;
+    const nextAttemptAt = terminal
+      ? null
+      : new Date(
+          now.getTime() + retryDelayMs(attempts, undefined, this.random),
+        );
     await this.prisma.outboxEvent.update({
       where: { id: event.id },
       data: {
         status: terminal ? "dead_letter" : "failed",
         attempts,
         lockedAt: null,
+        nextAttemptAt,
         error,
       },
     });

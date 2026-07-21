@@ -28,10 +28,30 @@ afterEach(() => {
 });
 
 describe("webhook signing and request contract", () => {
-  it("signs timestamp dot raw-body bytes with the known HMAC vector", () => {
-    expect(signWebhookPayload("test-secret", "1700000000", rawBody)).toBe(
-      "53b38c0fab3b48693f4ff01785fcc8679cabda46a7aeed6fab2195a0257fb2d7",
+  const signatureInput = {
+    timestamp: "1700000000",
+    deliveryId: request.deliveryId,
+    eventId: request.eventId,
+    eventType: request.eventType,
+    rawBody,
+  };
+
+  it("signs versioned delivery metadata and raw-body bytes with a known HMAC vector", () => {
+    expect(signWebhookPayload("test-secret", signatureInput)).toBe(
+      "bddec66da43e7c79a2d6192b0db2738e6b02a1db27914d07b8df25215fdc5390",
     );
+  });
+
+  it.each([
+    ["delivery id", { deliveryId: "del_tampered" }],
+    ["event id", { eventId: "evt_tampered" }],
+    ["event type", { eventType: "sales.order.cancelled" }],
+    ["timestamp", { timestamp: "1700000001" }],
+  ])("rejects a signature when the %s is changed", (_label, change) => {
+    const signature = signWebhookPayload("test-secret", signatureInput);
+    expect(
+      signWebhookPayload("test-secret", { ...signatureInput, ...change }),
+    ).not.toBe(signature);
   });
 
   it("sends stable headers and raw bytes without following redirects", async () => {
@@ -57,7 +77,7 @@ describe("webhook signing and request contract", () => {
       "x-erp-event": "sales.order.approved",
       "x-erp-event-id": "evt_001",
       "x-erp-signature":
-        "v1=53b38c0fab3b48693f4ff01785fcc8679cabda46a7aeed6fab2195a0257fb2d7",
+        "v1=bddec66da43e7c79a2d6192b0db2738e6b02a1db27914d07b8df25215fdc5390",
       "x-erp-signature-version": "v1",
       "x-erp-timestamp": "1700000000",
     });

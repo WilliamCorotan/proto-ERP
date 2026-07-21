@@ -1804,6 +1804,7 @@ model WebhookSubscription {
   deliveries   WebhookDelivery[]
   outboxEvents OutboxEvent[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, active])
 }
 
@@ -1826,11 +1827,12 @@ model WebhookDelivery {
   updatedAt      DateTime  @updatedAt
 
   tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  outboxEvent  OutboxEvent?        @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  subscription WebhookSubscription @relation(fields: [tenantId, subscriptionId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "WebhookDelivery_tenantId_subscriptionId_fkey")
+  outboxEvent  OutboxEvent?        @relation(fields: [tenantId, outboxEventId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "WebhookDelivery_tenantId_outboxEventId_fkey")
   deadLetters  DeadLetterRecord[]
 
   @@unique([tenantId, subscriptionId, outboxEventId])
+  @@index([tenantId, outboxEventId])
   @@index([tenantId, status])
   @@index([tenantId, eventType])
   @@index([tenantId, subscriptionId])
@@ -1862,20 +1864,23 @@ model OutboxEvent {
   status         String    @default("pending")
   attempts       Int       @default(0)
   lockedAt       DateTime?
+  nextAttemptAt  DateTime?
   dispatchedAt   DateTime?
   error          String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subscription WebhookSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription WebhookSubscription? @relation(fields: [tenantId, subscriptionId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "OutboxEvent_tenantId_subscriptionId_fkey")
   deadLetters  DeadLetterRecord[]
   deliveries   WebhookDelivery[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, status])
   @@index([tenantId, eventType])
   @@index([tenantId, createdAt])
   @@index([tenantId, subscriptionId])
+  @@index([status, nextAttemptAt, createdAt])
 }
 
 model WorkflowTaskRecord {
