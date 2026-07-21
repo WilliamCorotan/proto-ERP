@@ -1,6 +1,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
+export { PrismaSalesCustomerReadAdapter } from "./sales-customer-read.js";
+
 export type PrismaClientLike = {
   $connect(): Promise<void>;
   $disconnect(): Promise<void>;

@@ -31,6 +31,7 @@ import {
   type QualitySnapshot,
   type ReportingSnapshot,
   type SalesSnapshot,
+  type SalesCustomerPage,
   type WorkflowActionsResponse,
   type WorkflowInboxResponse,
   type WorkflowInstance,
@@ -235,6 +236,25 @@ export async function getSalesSnapshot(): Promise<SalesSnapshot> {
     return await new ErpClient(apiUrl, token).sales();
   } catch (error) {
     return demoFallbackOrThrow(error, () => demoSalesData);
+  }
+}
+
+export async function getSalesCustomersPage(): Promise<SalesCustomerPage> {
+  const token = requireSessionToken(
+    (await cookies()).get("erp_token")?.value,
+    "sales customers",
+  );
+  try {
+    return await new ErpClient(apiUrl, token).salesCustomers({ limit: 100 });
+  } catch (error) {
+    return demoFallbackOrThrow(error, () => ({
+      items: demoSalesData.customers,
+      pageInfo: {
+        endCursor: demoSalesData.customers.at(-1)?.id ?? null,
+        hasNextPage: false,
+        limit: 100,
+      },
+    }));
   }
 }
 

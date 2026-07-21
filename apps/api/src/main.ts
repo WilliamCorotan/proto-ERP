@@ -13,17 +13,20 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import {
   ApiBearerAuth,
+  ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -39,7 +42,13 @@ import { qualityManifest } from "@erp/quality";
 import { reportingManifest } from "@erp/reporting";
 import { integrationManifest } from "@erp/integration";
 import { operationsManifest } from "@erp/operations";
-import { salesManifest } from "@erp/sales";
+import {
+  ListSalesCustomersUseCase,
+  SalesCustomerReadError,
+  salesManifest,
+  type ListSalesCustomersInput,
+} from "@erp/sales";
+import { createPrismaClient, PrismaSalesCustomerReadAdapter } from "@erp/db";
 import {
   PrismaErpRepository,
   type CreateCustomerInput,
@@ -143,6 +152,10 @@ class ErpReadService {
     hrManifest,
   ]);
   private readonly repository = new PrismaErpRepository();
+  private readonly customerReadClient = createPrismaClient();
+  private readonly listSalesCustomers = new ListSalesCustomersUseCase(
+    new PrismaSalesCustomerReadAdapter(this.customerReadClient),
+  );
   private readonly integrationUseCases = new IntegrationUseCases(
     this.repository,
   );
@@ -461,6 +474,10 @@ class ErpReadService {
 
   async sales(tenantId: string) {
     return this.repository.sales(tenantId);
+  }
+
+  async salesCustomers(tenantId: string, input: ListSalesCustomersInput) {
+    return this.listSalesCustomers.execute(tenantId, input);
   }
 
   async accounting(tenantId: string) {
@@ -1311,6 +1328,51 @@ export class ErpController {
       "sales.customer.read",
     );
     return this.reads.sales(session.tenantId);
+  }
+
+  @ApiTags("sales")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "List customers with bounded cursor pagination" })
+  @ApiQuery({ name: "after", required: false, schema: { type: "string" } })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+  })
+  @ApiQuery({
+    name: "search",
+    required: false,
+    schema: { type: "string", maxLength: 100 },
+  })
+  @ApiQuery({
+    name: "status",
+    required: false,
+    schema: { type: "string", enum: ["active", "paused"] },
+  })
+  @ApiOkResponse({ schema: ref("SalesCustomerPage") })
+  @ApiBadRequestResponse({ schema: ref("ErrorResponse") })
+  @ApiUnauthorizedResponse({ schema: ref("ErrorResponse") })
+  @ApiForbiddenResponse({ schema: ref("ErrorResponse") })
+  @Get("sales/customers")
+  async salesCustomers(
+    @Headers("authorization") authorization: string | undefined,
+    @Query() query: ListSalesCustomersInput,
+  ) {
+    const session = this.auth.requirePermission(
+      authorization,
+      "sales.customer.read",
+    );
+    try {
+      return await this.reads.salesCustomers(session.tenantId, query);
+    } catch (error) {
+      if (error instanceof SalesCustomerReadError) {
+        throw new BadRequestException({
+          code: error.code,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
   }
 
   @ApiTags("accounting")

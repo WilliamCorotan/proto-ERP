@@ -1,5 +1,5 @@
 import type { CustomFieldDefinition } from "@erp/sdk";
-import { getCustomizationSnapshot, getSalesSnapshot } from "../data";
+import { getCustomizationSnapshot, getSalesCustomersPage } from "../data";
 import { createCustomerAction, updateCustomerAction } from "../actions";
 
 function money(amount: number, currency: string) {
@@ -7,7 +7,7 @@ function money(amount: number, currency: string) {
 }
 
 export default async function CustomersPage() {
-  const [{ customers }, customization] = await Promise.all([getSalesSnapshot(), getCustomizationSnapshot()]);
+  const [{ items: customers }, customization] = await Promise.all([getSalesCustomersPage(), getCustomizationSnapshot()]);
   const customerFields = customization.customFields
     .filter((field) => field.entityType === "Customer")
     .sort((a, b) => a.displayOrder - b.displayOrder || a.label.localeCompare(b.label));

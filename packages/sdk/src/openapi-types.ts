@@ -161,6 +161,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sales/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List customers with bounded cursor pagination */
+        get: operations["ErpController_salesCustomers"];
+        put?: never;
+        /** Create a customer */
+        post: operations["ErpController_createCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounting": {
         parameters: {
             query?: never;
@@ -1574,23 +1592,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sales/customers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a customer */
-        post: operations["ErpController_createCustomer"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/sales/products": {
         parameters: {
             query?: never;
@@ -1972,6 +1973,15 @@ export interface components {
             email: string;
             creditLimit: components["schemas"]["Money"];
             customFields: components["schemas"]["CustomFields"];
+        };
+        SalesCustomerPageInfo: {
+            endCursor: string | null;
+            hasNextPage: boolean;
+            limit: number;
+        };
+        SalesCustomerPage: {
+            items: components["schemas"]["Customer"][];
+            pageInfo: components["schemas"]["SalesCustomerPageInfo"];
         };
         Product: {
             id: string;
@@ -3884,6 +3894,7 @@ export interface components {
             service: string;
         };
         ErrorResponse: {
+            code?: string;
             message: string | string[];
             error?: string;
             statusCode?: number;
@@ -4136,6 +4147,93 @@ export interface operations {
                 };
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ErpController_salesCustomers: {
+        parameters: {
+            query?: {
+                status?: "active" | "paused";
+                search?: string;
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesCustomerPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ErpController_createCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCustomerRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7344,45 +7442,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServiceCase"];
-                };
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    ErpController_createCustomer: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCustomerRequest"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Customer"];
                 };
             };
             401: {

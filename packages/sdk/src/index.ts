@@ -6,6 +6,13 @@ export type OpenApiPaths = paths;
 
 export type DashboardSummary = Schemas["DashboardSummary"];
 export type SalesSnapshot = Schemas["SalesSnapshot"];
+export type SalesCustomerPage = Schemas["SalesCustomerPage"];
+export type ListSalesCustomersQuery = {
+  after?: string;
+  limit?: number;
+  search?: string;
+  status?: "active" | "paused";
+};
 export type ModuleManifest = Schemas["ModuleManifest"];
 export type WorkflowPolicy = Schemas["WorkflowPolicy"];
 export type WorkflowActionsRequest = Schemas["WorkflowActionsRequest"];
@@ -185,6 +192,18 @@ export class ErpClient {
 
   async sales(): Promise<SalesSnapshot> {
     return this.get("/sales");
+  }
+
+  async salesCustomers(
+    query: ListSalesCustomersQuery = {},
+  ): Promise<SalesCustomerPage> {
+    const parameters = new URLSearchParams();
+    if (query.after) parameters.set("after", query.after);
+    if (query.limit !== undefined) parameters.set("limit", String(query.limit));
+    if (query.search) parameters.set("search", query.search);
+    if (query.status) parameters.set("status", query.status);
+    const suffix = parameters.size > 0 ? `?${parameters.toString()}` : "";
+    return this.get(`/sales/customers${suffix}`);
   }
 
   async customization(): Promise<CustomizationSnapshot> {
