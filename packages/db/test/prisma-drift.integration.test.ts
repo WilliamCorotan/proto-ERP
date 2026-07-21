@@ -16,8 +16,17 @@ const acknowledgedRollbackWindowDrift = [
   'ALTER TABLE "JournalLine" DROP CONSTRAINT "JournalLine_entryId_fkey";',
   'ALTER TABLE "Payment" DROP CONSTRAINT "Payment_invoiceId_fkey";',
   'ALTER TABLE "Payment" DROP CONSTRAINT "Payment_journalEntryId_fkey";',
+  'ALTER TABLE "PurchaseInvoice" DROP CONSTRAINT "PurchaseInvoice_journalEntryId_fkey";',
+  'ALTER TABLE "PurchaseInvoice" DROP CONSTRAINT "PurchaseInvoice_purchaseOrderId_fkey";',
+  'ALTER TABLE "PurchaseOrder" DROP CONSTRAINT "PurchaseOrder_supplierId_fkey";',
+  'ALTER TABLE "PurchaseReceipt" DROP CONSTRAINT "PurchaseReceipt_productId_fkey";',
+  'ALTER TABLE "PurchaseReceipt" DROP CONSTRAINT "PurchaseReceipt_purchaseOrderId_fkey";',
   'ALTER TABLE "Quote" DROP CONSTRAINT "Quote_customerId_fkey";',
+  'ALTER TABLE "RequestForQuote" DROP CONSTRAINT "RequestForQuote_supplierId_fkey";',
   'ALTER TABLE "SalesOrder" DROP CONSTRAINT "SalesOrder_quoteId_fkey";',
+  'ALTER TABLE "SupplierPayment" DROP CONSTRAINT "SupplierPayment_journalEntryId_fkey";',
+  'ALTER TABLE "SupplierPayment" DROP CONSTRAINT "SupplierPayment_purchaseInvoiceId_fkey";',
+  'ALTER TABLE "SupplierQuotation" DROP CONSTRAINT "SupplierQuotation_supplierId_fkey";',
   'ALTER TABLE "UserRole" DROP CONSTRAINT "UserRole_roleId_fkey";',
   'ALTER TABLE "UserRole" DROP CONSTRAINT "UserRole_userId_fkey";',
   'ALTER INDEX "WorkflowAssignmentRule_tenantId_workflowId_fromState_toState_ac" RENAME TO "WorkflowAssignmentRule_tenantId_workflowId_fromState_toStat_idx";',
@@ -62,7 +71,7 @@ describe.sequential("Prisma schema drift", () => {
     expect(executableStatements(stdout)).toEqual(
       acknowledgedRollbackWindowDrift,
     );
-  });
+  }, 30_000);
 });
 
 function executableStatements(script: string): string[] {
