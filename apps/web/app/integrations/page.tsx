@@ -37,10 +37,11 @@ export default async function IntegrationsPage({
   const params = (await searchParams) ?? {};
   const subscription = integration.webhookSubscriptions[0];
   const failedDeliveries = integration.webhookDeliveries.filter(
-    (delivery) => delivery.status === "failed",
+    (delivery) =>
+      delivery.status === "failed" || delivery.status === "dead_letter",
   );
   const dispatchableOutbox = integration.outboxEvents.filter(
-    (event) => event.status === "pending" || event.status === "failed",
+    (event) => event.status === "failed" || event.status === "dead_letter",
   );
   const taskFilters = {
     status: firstParam(params.status),
@@ -154,7 +155,7 @@ export default async function IntegrationsPage({
           </Timeline>
         </RecordPanel>
 
-        <RecordPanel eyebrow="Events" title="Webhook dispatch">
+        <RecordPanel eyebrow="Events" title="Webhook delivery queue">
           <form action={dispatchWebhookAction} className="record-form">
             <label>
               Subscription
@@ -188,12 +189,8 @@ export default async function IntegrationsPage({
               Entity ID
               <input name="entityId" defaultValue="wo-demo" required />
             </label>
-            <label>
-              Simulate failure
-              <input name="fail" type="checkbox" defaultChecked />
-            </label>
             <button type="submit" disabled={!subscription}>
-              Dispatch webhook
+              Enqueue webhook
             </button>
           </form>
           <Timeline>
@@ -208,11 +205,11 @@ export default async function IntegrationsPage({
                 <p>
                   {delivery.eventType} - attempt {delivery.attempts}
                 </p>
-                <button type="submit">Retry</button>
+                <button type="submit">Requeue</button>
               </form>
             ))}
             {failedDeliveries.length === 0 ? (
-              <p>No failed deliveries.</p>
+              <p>No replayable deliveries.</p>
             ) : null}
           </Timeline>
         </RecordPanel>
@@ -222,7 +219,7 @@ export default async function IntegrationsPage({
         <RecordPanel
           badge={
             <Badge tone={dispatchableOutbox.length ? "warning" : "success"}>
-              {dispatchableOutbox.length} dispatchable
+              {dispatchableOutbox.length} replayable
             </Badge>
           }
           eyebrow="Outbox"
@@ -242,15 +239,11 @@ export default async function IntegrationsPage({
                 <p>
                   {event.eventType} - attempts {event.attempts}
                 </p>
-                <button type="submit">
-                  {event.status === "failed" && event.attempts >= 2
-                    ? "Dead letter"
-                    : "Dispatch"}
-                </button>
+                <button type="submit">Requeue</button>
               </form>
             ))}
             {dispatchableOutbox.length === 0 ? (
-              <p>No dispatchable outbox events.</p>
+              <p>No replayable outbox events.</p>
             ) : null}
           </Timeline>
         </RecordPanel>
