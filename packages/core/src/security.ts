@@ -43,21 +43,33 @@ export function signAuthToken(payload: Omit<AuthTokenPayload, "exp">, secret: st
 }
 
 export function verifyAuthToken(token: string, secret: string): AuthTokenPayload | null {
-  const [header, body, signature] = token.split(".");
-  if (!header || !body || !signature) {
+  const segments = token.split(".");
+  if (segments.length !== 3) {
+    return null;
+  }
+  const [header, body, signature] = segments;
+  if (!header || !body || !signature) return null;
+
+  const actualSignature = decodeBase64Url(signature);
+  const expectedSignature = decodeBase64Url(sign(`${header}.${body}`, secret));
+  if (
+    !actualSignature ||
+    !expectedSignature ||
+    actualSignature.length !== expectedSignature.length ||
+    !timingSafeEqual(actualSignature, expectedSignature)
+  ) {
     return null;
   }
 
-  const expected = sign(`${header}.${body}`, secret);
-  if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as AuthTokenPayload;
+    if (!Number.isFinite(payload.exp) || payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+    return payload;
+  } catch {
     return null;
   }
-
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as AuthTokenPayload;
-  if (payload.exp < Math.floor(Date.now() / 1000)) {
-    return null;
-  }
-  return payload;
 }
 
 function encodeJson(value: Record<string, unknown>): string {
@@ -66,4 +78,10 @@ function encodeJson(value: Record<string, unknown>): string {
 
 function sign(value: string, secret: string): string {
   return createHmac("sha256", secret).update(value).digest("base64url");
+}
+
+function decodeBase64Url(value: string): Buffer | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const decoded = Buffer.from(value, "base64url");
+  return decoded.toString("base64url") === value ? decoded : null;
 }
