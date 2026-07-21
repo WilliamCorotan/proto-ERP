@@ -336,6 +336,7 @@ model Product {
   channelCatalogItems ChannelCatalogItem[]
 
   @@unique([tenantId, sku])
+  @@unique([tenantId, id], map: "Product_tenantId_id_key")
   @@index([tenantId, name])
 }
 
@@ -907,6 +908,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
 
   @@unique([tenantId, code])
+  @@unique([tenantId, id], map: "Supplier_tenantId_id_key")
   @@index([tenantId, name])
 }
 
@@ -939,10 +941,11 @@ model RequestForQuote {
   updatedAt  DateTime     @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier Supplier @relation(fields: [tenantId, supplierId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "RequestForQuote_tenantId_supplierId_fkey")
 
   @@unique([tenantId, number])
   @@index([tenantId, status])
+  @@index([tenantId, supplierId], map: "RequestForQuote_tenantId_supplierId_idx")
 }
 
 model SupplierQuotation {
@@ -959,10 +962,11 @@ model SupplierQuotation {
   updatedAt  DateTime     @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier Supplier @relation(fields: [tenantId, supplierId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SupplierQuotation_tenantId_supplierId_fkey")
 
   @@unique([tenantId, number])
   @@index([tenantId, status])
+  @@index([tenantId, supplierId], map: "SupplierQuotation_tenantId_supplierId_idx")
 }
 
 model PurchaseOrder {
@@ -979,12 +983,14 @@ model PurchaseOrder {
   updatedAt    DateTime     @updatedAt
 
   tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplier Supplier          @relation(fields: [tenantId, supplierId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "PurchaseOrder_tenantId_supplierId_fkey")
   receipts PurchaseReceipt[]
   invoices PurchaseInvoice[]
 
   @@unique([tenantId, number])
+  @@unique([tenantId, id], map: "PurchaseOrder_tenantId_id_key")
   @@index([tenantId, status])
+  @@index([tenantId, supplierId], map: "PurchaseOrder_tenantId_supplierId_idx")
 }
 
 model PurchaseReceipt {
@@ -999,14 +1005,15 @@ model PurchaseReceipt {
   createdAt       DateTime @default(now())
 
   tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrder         PurchaseOrder          @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  product               Product?               @relation(fields: [productId], references: [id], onDelete: SetNull)
+  purchaseOrder         PurchaseOrder          @relation(fields: [tenantId, purchaseOrderId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "PurchaseReceipt_tenantId_purchaseOrderId_fkey")
+  product               Product?               @relation(fields: [tenantId, productId], references: [tenantId, id], onDelete: SetNull, onUpdate: Restrict, map: "PurchaseReceipt_tenantId_productId_fkey")
   stockMovements        StockMovement[]
   putAwayTasks          PutAwayTask[]
   landedCostAllocations LandedCostAllocation[]
 
   @@unique([tenantId, number])
   @@unique([tenantId, purchaseOrderId])
+  @@index([tenantId, productId], map: "PurchaseReceipt_tenantId_productId_idx")
   @@index([tenantId, status])
 }
 
@@ -1024,12 +1031,14 @@ model PurchaseInvoice {
   updatedAt       DateTime @updatedAt
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrder PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  journalEntry  JournalEntry?     @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  purchaseOrder PurchaseOrder     @relation(fields: [tenantId, purchaseOrderId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "PurchaseInvoice_tenantId_purchaseOrderId_fkey")
+  journalEntry  JournalEntry?     @relation(fields: [tenantId, journalEntryId], references: [tenantId, id], onDelete: SetNull, onUpdate: Restrict, map: "PurchaseInvoice_tenantId_journalEntryId_fkey")
   payments      SupplierPayment[]
 
   @@unique([tenantId, number])
   @@unique([tenantId, purchaseOrderId])
+  @@unique([tenantId, id], map: "PurchaseInvoice_tenantId_id_key")
+  @@index([tenantId, journalEntryId], map: "PurchaseInvoice_tenantId_journalEntryId_idx")
   @@index([tenantId, status])
 }
 
@@ -1045,10 +1054,11 @@ model SupplierPayment {
   createdAt         DateTime @default(now())
 
   tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
-  journalEntry    JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  purchaseInvoice PurchaseInvoice @relation(fields: [tenantId, purchaseInvoiceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "SupplierPayment_tenantId_purchaseInvoiceId_fkey")
+  journalEntry    JournalEntry?   @relation(fields: [tenantId, journalEntryId], references: [tenantId, id], onDelete: SetNull, onUpdate: Restrict, map: "SupplierPayment_tenantId_journalEntryId_fkey")
 
   @@index([tenantId, purchaseInvoiceId])
+  @@index([tenantId, journalEntryId], map: "SupplierPayment_tenantId_journalEntryId_idx")
 }
 
 model Warehouse {

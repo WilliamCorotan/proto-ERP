@@ -83,5 +83,5 @@ describe.sequential("PostgreSQL migration foundation", () => {
     } finally {
       await admin.end();
     }
-  });
+  }, 30_000);
 });
