@@ -11,6 +11,121 @@ export type Customer = {
   customFields: Record<string, string | number | boolean | null>;
 };
 
+export type SalesCustomerStatus = Customer["status"];
+
+export type ListSalesCustomersInput = {
+  after?: string | undefined;
+  limit?: number | string | undefined;
+  search?: string | undefined;
+  status?: string | undefined;
+};
+
+export type SalesCustomerPageQuery = {
+  after?: string | undefined;
+  limit: number;
+  search?: string | undefined;
+  status?: SalesCustomerStatus | undefined;
+};
+
+export type SalesCustomerPage = {
+  items: Customer[];
+  pageInfo: {
+    endCursor: string | null;
+    hasNextPage: boolean;
+    limit: number;
+  };
+};
+
+export type SalesCustomerReadPort = {
+  listCustomers(
+    tenantId: string,
+    query: SalesCustomerPageQuery,
+  ): Promise<SalesCustomerPage>;
+};
+
+export type SalesCustomerReadErrorCode =
+  "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_LIMIT";
+
+export class SalesCustomerReadError extends Error {
+  constructor(
+    readonly code: SalesCustomerReadErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SalesCustomerReadError";
+  }
+}
+
+export class ListSalesCustomersUseCase {
+  static readonly defaultLimit = 25;
+  static readonly maximumLimit = 100;
+
+  constructor(private readonly port: SalesCustomerReadPort) {}
+
+  execute(
+    tenantId: string,
+    input: ListSalesCustomersInput = {},
+  ): Promise<SalesCustomerPage> {
+    const limit = normalizeLimit(input.limit);
+    const after = normalizeOptionalText(input.after, "cursor", 200);
+    const search = normalizeOptionalText(input.search, "search", 100);
+    const status = normalizeStatus(input.status);
+    return this.port.listCustomers(tenantId, {
+      limit,
+      ...(after ? { after } : {}),
+      ...(search ? { search } : {}),
+      ...(status ? { status } : {}),
+    });
+  }
+}
+
+function normalizeLimit(value: number | string | undefined): number {
+  if (value === undefined || value === "") {
+    return ListSalesCustomersUseCase.defaultLimit;
+  }
+  const limit = typeof value === "number" ? value : Number(value);
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > ListSalesCustomersUseCase.maximumLimit
+  ) {
+    throw new SalesCustomerReadError(
+      "INVALID_LIMIT",
+      `limit must be an integer from 1 to ${ListSalesCustomersUseCase.maximumLimit}.`,
+    );
+  }
+  return limit;
+}
+
+function normalizeOptionalText(
+  value: string | undefined,
+  field: string,
+  maximumLength: number,
+): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > maximumLength) {
+    throw new SalesCustomerReadError(
+      field === "cursor" ? "INVALID_CURSOR" : "INVALID_FILTER",
+      `${field} must not exceed ${maximumLength} characters.`,
+    );
+  }
+  return normalized;
+}
+
+function normalizeStatus(
+  value: string | undefined,
+): SalesCustomerStatus | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value !== "active" && value !== "paused") {
+    throw new SalesCustomerReadError(
+      "INVALID_FILTER",
+      "status must be active or paused.",
+    );
+  }
+  return value;
+}
+
 export type Product = {
   id: string;
   sku: string;

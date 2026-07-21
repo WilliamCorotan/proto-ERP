@@ -9,7 +9,7 @@ import { operationsManifest } from "@erp/operations";
 import { procurementManifest } from "@erp/procurement";
 import { qualityManifest } from "@erp/quality";
 import { reportingManifest } from "@erp/reporting";
-import { salesManifest } from "@erp/sales";
+import { SalesCustomerReadError, salesManifest } from "@erp/sales";
 import { ErpController } from "./main.js";
 
 describe("API module registry", () => {
@@ -73,6 +73,56 @@ describe("ERP read authorization", () => {
       }
     },
   );
+
+  it("routes paginated customer reads through the sales boundary", async () => {
+    const session = {
+      tenantId: "ten_sales",
+      permissions: ["sales.customer.read"],
+    };
+    const reads = {
+      salesCustomers: vi.fn().mockResolvedValue({
+        items: [],
+        pageInfo: { endCursor: null, hasNextPage: false, limit: 10 },
+      }),
+    };
+    const auth = { requirePermission: vi.fn().mockReturnValue(session) };
+    const controller = new ErpController(reads as never, auth as never);
+    const query = { limit: "10", status: "active" };
+
+    await controller.salesCustomers("Bearer token", query);
+
+    expect(auth.requirePermission).toHaveBeenCalledWith(
+      "Bearer token",
+      "sales.customer.read",
+    );
+    expect(reads.salesCustomers).toHaveBeenCalledWith("ten_sales", query);
+  });
+
+  it("returns a stable bad-request code for invalid sales cursors", async () => {
+    const reads = {
+      salesCustomers: vi
+        .fn()
+        .mockRejectedValue(
+          new SalesCustomerReadError(
+            "INVALID_CURSOR",
+            "Customer cursor is not available for this tenant and filter.",
+          ),
+        ),
+    };
+    const auth = {
+      requirePermission: vi.fn().mockReturnValue({ tenantId: "ten_sales" }),
+    };
+    const controller = new ErpController(reads as never, auth as never);
+
+    await expect(
+      controller.salesCustomers("Bearer token", { after: "missing" }),
+    ).rejects.toMatchObject({
+      response: {
+        code: "INVALID_CURSOR",
+        message: "Customer cursor is not available for this tenant and filter.",
+      },
+    });
+  });
 });
 
 describe("generic workflow transition shutdown", () => {

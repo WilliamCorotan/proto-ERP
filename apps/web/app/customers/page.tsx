@@ -1,13 +1,25 @@
 import type { CustomFieldDefinition } from "@erp/sdk";
-import { getCustomizationSnapshot, getSalesSnapshot } from "../data";
+import { getCustomizationSnapshot, getSalesCustomersPage } from "../data";
 import { createCustomerAction, updateCustomerAction } from "../actions";
+import { CustomerPagination } from "./customer-pagination";
+
+type SearchParams = Record<string, string | string[] | undefined>;
 
 function money(amount: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
 }
 
-export default async function CustomersPage() {
-  const [{ customers }, customization] = await Promise.all([getSalesSnapshot(), getCustomizationSnapshot()]);
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
+  const params = (await searchParams) ?? {};
+  const after = firstParam(params.after);
+  const [{ items: customers, pageInfo }, customization] = await Promise.all([
+    getSalesCustomersPage(after),
+    getCustomizationSnapshot(),
+  ]);
   const customerFields = customization.customFields
     .filter((field) => field.entityType === "Customer")
     .sort((a, b) => a.displayOrder - b.displayOrder || a.label.localeCompare(b.label));
@@ -20,7 +32,7 @@ export default async function CustomersPage() {
             <p className="eyebrow">Sales</p>
             <h2>Customers</h2>
           </div>
-          <span className="status-pill">{customers.length} records</span>
+          <span className="status-pill">{customers.length} records on this page</span>
         </div>
         <div className="data-grid">
           {customers.map((customer) => (
@@ -59,6 +71,7 @@ export default async function CustomersPage() {
             </article>
           ))}
         </div>
+        <CustomerPagination after={after} pageInfo={pageInfo} />
       </section>
       <section className="panel">
         <div className="panel-heading">
@@ -99,6 +112,10 @@ export default async function CustomersPage() {
       </section>
     </div>
   );
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function CustomFieldInput({

@@ -67,6 +67,38 @@ describe("ErpClient", () => {
     });
   });
 
+  it("serializes bounded customer-read queries", async () => {
+    const page = {
+      items: [],
+      pageInfo: { endCursor: null, hasNextPage: false, limit: 25 },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(page),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new ErpClient("http://localhost:4000", "token").salesCustomers({
+        after: "cus_001",
+        limit: 25,
+        search: "North & South",
+        status: "active",
+      }),
+    ).resolves.toEqual(page);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4000/sales/customers?after=cus_001&limit=25&search=North+%26+South&status=active",
+      {
+        cache: "no-store",
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer token",
+        },
+      },
+    );
+  });
+
   it("fetches webhook event contracts", async () => {
     const events: WebhookEventContract[] = [
       {

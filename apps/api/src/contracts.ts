@@ -427,6 +427,23 @@ export const openApiSchemas: Record<string, unknown> = {
       customFields: ref("CustomFields"),
     },
   },
+  SalesCustomerPageInfo: {
+    type: "object",
+    required: ["endCursor", "hasNextPage", "limit"],
+    properties: {
+      endCursor: { type: "string", nullable: true },
+      hasNextPage: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    },
+  },
+  SalesCustomerPage: {
+    type: "object",
+    required: ["items", "pageInfo"],
+    properties: {
+      items: arrayOf(ref("Customer")),
+      pageInfo: ref("SalesCustomerPageInfo"),
+    },
+  },
   Product: {
     type: "object",
     required: ["id", "sku", "name", "category", "price", "stockOnHand"],
@@ -3921,6 +3938,7 @@ export const openApiSchemas: Record<string, unknown> = {
     type: "object",
     required: ["message"],
     properties: {
+      code: { type: "string" },
       message: {
         oneOf: [
           { type: "string" },

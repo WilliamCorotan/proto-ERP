@@ -10,6 +10,11 @@ const document = JSON.parse(
 
 type OpenApiOperation = {
   deprecated?: boolean;
+  parameters?: Array<{
+    name?: string;
+    in?: string;
+    schema?: Record<string, unknown>;
+  }>;
   requestBody?: unknown;
   security?: Array<Record<string, string[]>>;
   responses?: Record<
@@ -128,6 +133,18 @@ describe("OpenAPI contract", () => {
     );
   });
 
+  it("publishes the bounded sales customer pagination contract", () => {
+    const operation = document.paths["/sales/customers"]?.get;
+    expect(
+      operation?.parameters?.map((parameter) => parameter.name).sort(),
+    ).toEqual(["after", "limit", "search", "status"]);
+    expect(
+      operation?.responses?.["200"]?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/SalesCustomerPage" });
+    expect(document.components.schemas).toHaveProperty("SalesCustomerPage");
+    expect(document.components.schemas).toHaveProperty("SalesCustomerPageInfo");
+  });
+
   it("defines response schemas and mutating request schemas", () => {
     for (const [endpoint, path] of Object.entries(document.paths)) {
       for (const [method, operation] of Object.entries(path)) {
@@ -218,9 +235,7 @@ describe("OpenAPI contract", () => {
       "/sales",
       "/customization",
     ]) {
-      expect(document.paths[endpoint]?.get?.security).toEqual([
-        { bearer: [] },
-      ]);
+      expect(document.paths[endpoint]?.get?.security).toEqual([{ bearer: [] }]);
     }
   });
 

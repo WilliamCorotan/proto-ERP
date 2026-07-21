@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   clientTokens: [] as Array<string | undefined>,
   cookies: vi.fn(),
   sales: vi.fn(),
+  salesCustomers: vi.fn(),
   workflowInbox: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock("@erp/sdk", () => ({
     }
 
     sales = mocks.sales;
+    salesCustomers = mocks.salesCustomers;
     workflowInbox = mocks.workflowInbox;
   },
 }));
@@ -29,6 +31,7 @@ describe("ERP web data fallbacks", () => {
     });
     mocks.clientTokens.length = 0;
     mocks.sales.mockReset();
+    mocks.salesCustomers.mockReset();
     mocks.workflowInbox.mockReset();
   });
 
@@ -56,6 +59,26 @@ describe("ERP web data fallbacks", () => {
 
     expect(snapshot.customers.length).toBeGreaterThan(0);
     expect(snapshot.customers[0]?.id).toBe("cus_001");
+  });
+
+  it("passes the page cursor to the bounded customer read", async () => {
+    const page = {
+      items: [{ id: "cus_101" }],
+      pageInfo: {
+        endCursor: "cus_101",
+        hasNextPage: false,
+        limit: 100,
+      },
+    };
+    mocks.salesCustomers.mockResolvedValue(page);
+
+    const { getSalesCustomersPage } = await import("./data");
+
+    await expect(getSalesCustomersPage("cus_100")).resolves.toBe(page);
+    expect(mocks.salesCustomers).toHaveBeenCalledWith({
+      after: "cus_100",
+      limit: 100,
+    });
   });
 
   it("does not allow demo data in production", async () => {
