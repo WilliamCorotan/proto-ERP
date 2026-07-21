@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveJwtSecret } from "./auth.js";
+import { AuthService, resolveJwtSecret } from "./auth.js";
 
 describe("JWT secret configuration", () => {
   it("uses a development-only fallback outside production", () => {
@@ -45,5 +45,15 @@ describe("JWT secret configuration", () => {
     expect(
       resolveJwtSecret({ NODE_ENV: "production", JWT_SECRET: secret }),
     ).toBe(secret);
+  });
+});
+
+describe("session token rejection", () => {
+  it("maps a malformed unequal-length signature to unauthorized", () => {
+    const auth = new AuthService();
+
+    expect(() => auth.currentUser("Bearer header.payload.x")).toThrow(
+      "Invalid or expired token.",
+    );
   });
 });
